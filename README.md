@@ -5,6 +5,9 @@ It is designed to be consumed by MCP-compatible clients (such as Open WebUI via 
 
 The server provides comprehensive coverage of OpenProject functionality including projects, work packages, users, groups, notifications, attachments, custom actions, and schema discovery.
 
+This server is intentionally monolithic to maximize OpenProject API coverage.
+If desired, it can be split into domain-specific MCP servers (projects, work packages, users, etc.) for scalability.
+
 ---
 
 ## Architecture Overview
