@@ -3,7 +3,7 @@ import httpx
 import sqlite3
 import json
 from mcp.server.fastmcp import FastMCP
-from typing import Optional, Union, Dict, List
+from typing import Optional, Union, Dict, List, Any
 from config import host
 from config import xcred as api_key
 
@@ -52,12 +52,20 @@ async def make_request(url: str, method: str, headers: dict = None, data: dict =
 
             response = await getattr(client, method_lower)(url, **request_args)
             response.raise_for_status()
+            #return json.dumps(response).json()
             return response.json()
 
         except httpx.HTTPStatusError as e:
-            return {"error": str(e), "details": e.response.text}
+            return {
+                "error": "HTTP error",
+                "status": e.response.status_code,
+                "details": e.response.text,
+            }
         except Exception as e:
-            return {"error": str(e)}
+            return {
+                "error": "Request failed",
+                "details": str(e),
+            }
 
 @mcp.tool()
 async def run_api(query: str, method: str) -> str:
@@ -77,7 +85,8 @@ async def run_api(query: str, method: str) -> str:
         It also handles response formatting and error handling to return a clean response.
     """
     # Prepare headers
-    api_url = f"https://{host}/api/v3{query}"
+    host = "pm.v.spaceagecu.org/api/v3"
+    api_url = f"https://{host}{query}"
     api_key = f"Basic {api_key}"
     headers = {"Authorization": api_key, "Content-Type": "application/json", "Connection": "keep-alive"}
     
@@ -86,7 +95,7 @@ async def run_api(query: str, method: str) -> str:
 
     # Forward the request to the external API and return the response
     response = await make_request(f"{api_url}", method, headers=headers, data=data, params=params)
-    return response
+    return json.dumps(response)
 
 @mcp.tool()
 async def create_project(name: str, description: Optional[str] = None, identifier: Optional[str] = None, public: bool = True,status_explanation: Optional[str] = None) -> str:
@@ -142,7 +151,7 @@ async def create_project(name: str, description: Optional[str] = None, identifie
             headers=headers, 
             json=payload
         )
-        return response
+        return json.dumps(response)
     except Exception as e:
         return f"Error creating project: {str(e)}"
 
@@ -178,69 +187,68 @@ async def view_project(project_id: int) -> str:
             method="GET", 
             headers=headers
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving project {project_id}: {str(e)}"
 
 @mcp.tool()
-async def list_projects(
-    filters: Optional[Dict] = None,
-    sort_by: Optional[List[Dict[str, str]]] = None,
-    select: Optional[List[str]] = None
-) -> str:
+async def list_projects() -> Dict[str, Any]:
     """
     Retrieves a list of projects from OpenProject, optionally filtering and sorting the results.
-
-    Args:
-        filters (Dict, optional): A dictionary defining project filter conditions. 
-                                  Example: {"active": [True], "name_and_identifier": [{"operator": "~", "values": ["Test"]}]}
-                                  Keys correspond to the filters listed in the OpenProject API documentation.
-        sort_by (List[Dict[str, str]], optional): A list of dictionaries defining sort criteria.
-                                                  Example: [{"id": "asc"}, {"name": "desc"}]
-        select (List[str], optional): A list of properties to include in the response (e.g., ["id", "name", "public"]).
-
+    
     Returns:
         str: The JSON collection of projects matching the criteria or an error message.
     """
-    
-    # 1. Configuration (Load from environment variables/shared state)
     api_url = f"https://{host}/api/v3/projects"
+
+    headers = {
+        "Authorization": f"Basic {api_key}",
+        "Content-Type": "application/json"
+    }
+
+    return await make_request(
+        url=api_url,
+        method="GET",
+        headers=headers
+    )
+
+@mcp.tool()
+async def list_statuses() -> str:
+    """
+    Retrieves a collection of all available work package statuses (e.g., New, In Progress, Closed).
     
-    # 2. Prepare Headers
+    Returns:
+        str: The JSON collection of work package statuses or an error message.
+    """
+    
+    # 1. Configuration
+
+    
+    # 2. Construct the URL
+    # URL pattern: GET /api/v3/statuses
+    api_url = f"https://{host}/api/v3/statuses"
+    
+    # 3. Prepare Headers
     headers = {
         "Authorization": f"Basic {api_key}", 
         "Content-Type": "application/json"
     }
-
-    # 3. Construct Query Parameters (Params)
-    params = {}
-    
-    if filters:
-        # OpenProject requires the filters value to be a JSON string
-        params['filters'] = json.dumps(filters)
-        
-    if sort_by:
-        # OpenProject requires the sortBy value to be a JSON string (List of objects)
-        params['sortBy'] = json.dumps(sort_by)
-        
-    if select:
-        # OpenProject requires the select value to be a comma-separated string
-        params['select'] = ",".join(select)
     
     # 4. Send Request
     try:
-        # GET requests use method="GET" and place filters/sorting in the query string (params)
-        response = await make_request(
+        # make_request returns a Python dictionary (deserialized JSON)
+        response_dict = await make_request(
             url=api_url, 
             method="GET", 
-            headers=headers,
-            params=params
+            headers=headers
         )
-        return response
+        
+        # 5. CONVERT DICT TO JSON STRING BEFORE RETURNING
+        return json.dumps(response_dict) # <-- THE FIX
         
     except Exception as e:
-        return f"Error listing projects: {str(e)}"
+        return f"Error retrieving work package statuses: {str(e)}"
 
 @mcp.tool()
 async def update_project(
@@ -313,7 +321,7 @@ async def update_project(
             headers=headers,
             json=payload
         )
-        return response
+        return json.dumps(response)
 
     except Exception as e:
         return f"Error updating project {project_id}: {str(e)}"
@@ -352,7 +360,7 @@ async def view_project_status(status_id: Union[int, str]) -> str:
             method="GET", 
             headers=headers
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving project status {status_id}: {str(e)}"
@@ -433,7 +441,7 @@ async def get_project_work_packages(
             headers=headers,
             params=params
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving work packages for project {project_id}: {str(e)}"
@@ -470,7 +478,7 @@ async def get_project_available_assignees(project_id: int) -> str:
             method="GET", 
             headers=headers
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving available assignees for project {project_id}: {str(e)}"
@@ -520,7 +528,7 @@ async def view_work_package(
             headers=headers,
             params=params
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving work package {work_package_id}: {str(e)}"
@@ -621,38 +629,25 @@ async def create_work_package(
             params=params,
             json=payload
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error creating work package in project {project_id}: {str(e)}"
 
 @mcp.tool()
 async def list_work_packages(
-    offset: Optional[int] = None,
-    page_size: Optional[int] = None,
-    filters: Optional[Union[List, Dict]] = None,
-    sort_by: Optional[List[Dict[str, str]]] = None,
-    group_by: Optional[str] = None,
-    show_sums: Optional[bool] = None,
-    select: Optional[List[str]] = None,
-    timestamps: Optional[List[str]] = None
+    filters: Optional[Union[List, Dict]] = None
 ) -> str:
     """
     Retrieves a global collection of work packages (tasks, bugs, etc.) across all projects.
     Can be filtered by project, assignee, status, etc.
     
     Args:
-        offset (int, optional): Page number (1-based) for pagination.
-        page_size (int, optional): Number of items per page.
         filters (Union[List, Dict], optional): JSON-compatible filter conditions.
             Examples:
             - Find open bugs: [{"type": {"operator": "=", "values": ["1"]}, "status": {"operator": "o", "values": []}}]
             - Specific Project: [{"project": {"operator": "=", "values": ["5"]}}]
         sort_by (List[Dict], optional): JSON-compatible sort criteria. Example: [{"id": "desc"}]
-        group_by (str, optional): The column name to group results by.
-        show_sums (bool, optional): Whether to sum up numerical properties.
-        select (List[str], optional): specific properties to include (e.g., ["id", "subject", "project"]).
-        timestamps (List[str], optional): A list of ISO-8601 timestamps for baseline comparison.
     
     Returns:
         str: JSON string containing the list of work packages.
@@ -669,34 +664,34 @@ async def list_work_packages(
         "Content-Type": "application/json"
     }
     
-    # 4. Construct Query Parameters
-    params = {}
-    
-    if offset is not None:
-        params['offset'] = offset
-        
-    if page_size is not None:
-        params['pageSize'] = page_size
-        
-    if filters is not None:
-        # OpenProject requires a JSON string for filters
-        params['filters'] = json.dumps(filters)
-        
-    if sort_by is not None:
-        params['sortBy'] = json.dumps(sort_by)
-        
-    if group_by is not None:
-        params['groupBy'] = group_by
-        
-    if show_sums is not None:
-        params['showSums'] = "true" if show_sums else "false"
-        
-    if select is not None:
-        params['select'] = ",".join(select)
 
-    if timestamps is not None:
-        # Join list into comma-separated string for baseline comparison
-        params['timestamps'] = ",".join(timestamps)
+    default_status_filter = {
+        "status_id": {
+            "operator": "o",
+            "values": None
+        }
+    }
+
+    if filters is None:
+        effective_filters = [default_status_filter]
+    elif filters == []:
+        effective_filters = []
+    else:
+        effective_filters = [default_status_filter, *filters]
+
+    effective_sort_by = [["id", "asc"]]
+    effective_timestamps = "PT0S"
+    
+    params = {
+        "offset": 1,
+        "pageSize": 20,
+        "filters": json.dumps(effective_filters),
+        "sortBy": json.dumps(effective_sort_by),
+
+        "showSums": "false",
+
+        "timestamps": effective_timestamps
+    }
 
     # 5. Send Request
     try:
@@ -706,7 +701,7 @@ async def list_work_packages(
             headers=headers,
             params=params
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error listing work packages: {str(e)}"
@@ -744,7 +739,7 @@ async def list_work_package_activities(work_package_id: int) -> str:
             method="GET", 
             headers=headers
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving activities for work package {work_package_id}: {str(e)}"
@@ -856,7 +851,7 @@ async def update_work_package(
             params=params,
             json=payload
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error updating work package {work_package_id}: {str(e)}"
@@ -914,7 +909,7 @@ async def comment_work_package(
             params=params,
             json=payload
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error commenting on work package {work_package_id}: {str(e)}"
@@ -952,7 +947,7 @@ async def get_work_package_available_assignees(work_package_id: int) -> str:
             method="GET", 
             headers=headers
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving available assignees for work package {work_package_id}: {str(e)}"
@@ -989,7 +984,7 @@ async def get_work_package_available_watchers(work_package_id: int) -> str:
             method="GET", 
             headers=headers
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving available watchers for work package {work_package_id}: {str(e)}"
@@ -1026,7 +1021,7 @@ async def list_work_package_watchers(work_package_id: int) -> str:
             method="GET", 
             headers=headers
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving watchers for work package {work_package_id}: {str(e)}"
@@ -1076,7 +1071,7 @@ async def add_work_package_watcher(work_package_id: int, user_id: int) -> str:
             headers=headers,
             json=payload
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error adding watcher to work package {work_package_id}: {str(e)}"
@@ -1156,7 +1151,7 @@ async def view_activity(activity_id: int) -> str:
             method="GET", 
             headers=headers
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving activity {activity_id}: {str(e)}"
@@ -1204,7 +1199,7 @@ async def update_activity(activity_id: int, new_comment_text: str) -> str:
             headers=headers,
             json=payload
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error updating activity {activity_id}: {str(e)}"
@@ -1242,7 +1237,7 @@ async def list_work_package_attachments(work_package_id: int) -> str:
             method="GET", 
             headers=headers
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving attachments for work package {work_package_id}: {str(e)}"
@@ -1320,7 +1315,7 @@ async def create_work_package_attachment(
             headers=headers,
             files=files
         )
-        return response
+        return json.dumps(response)
 
     except Exception as e:
         return f"Error creating attachment for work package {work_package_id}: {str(e)}"
@@ -1398,7 +1393,7 @@ async def create_attachment(
             headers=headers,
             files=files
         )
-        return response
+        return json.dumps(response)
 
     except Exception as e:
         return f"Error uploading attachment: {str(e)}"
@@ -1437,7 +1432,7 @@ async def view_attachment(attachment_id: int) -> str:
             method="GET", 
             headers=headers
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving attachment {attachment_id}: {str(e)}"
@@ -1519,7 +1514,7 @@ async def get_custom_action(custom_action_id: int) -> str:
             method="GET", 
             headers=headers
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving custom action {custom_action_id}: {str(e)}"
@@ -1576,7 +1571,7 @@ async def execute_custom_action(
             headers=headers,
             json=payload
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error executing custom action {custom_action_id} on work package {work_package_id}: {str(e)}"
@@ -1637,7 +1632,7 @@ async def get_work_package_file_links(
             headers=headers,
             params=params
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving file links for work package {work_package_id}: {str(e)}"
@@ -1675,7 +1670,7 @@ async def get_file_link(file_link_id: int) -> str:
             method="GET", 
             headers=headers
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving file link {file_link_id}: {str(e)}"
@@ -1733,7 +1728,7 @@ async def list_groups(
             headers=headers,
             params=params
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving groups: {str(e)}"
@@ -1798,7 +1793,7 @@ async def list_users(
             headers=headers,
             params=params
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving user list: {str(e)}"
@@ -1862,7 +1857,7 @@ async def get_notification_collection(
             headers=headers,
             params=params
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving notifications: {str(e)}"
@@ -1901,7 +1896,7 @@ async def get_notification_detail(notification_id: int, detail_id: int) -> str:
             method="GET", 
             headers=headers
         )
-        return response
+        return json.dumps(response)
         
     except Exception as e:
         return f"Error retrieving detail {detail_id} for notification {notification_id}: {str(e)}"
